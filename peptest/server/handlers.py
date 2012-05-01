@@ -2,6 +2,7 @@ import ConfigParser
 import datetime
 import templeton.handlers
 import web
+from collections import defaultdict
 
 class DefaultConfigParser(ConfigParser.ConfigParser):
 
@@ -57,7 +58,11 @@ class Results(object):
         if wheres:
             query += ' where %s' % ' and '.join(wheres)
         results = db.query(query, vars=vars)
-        response = []
+        
+        # average results for each revision
+        # all results are for just one test/platform/branch, so we can keep
+        # this simple
+        by_revision = defaultdict(list)
         for r in results:
             d = {}
             for k, v in r.iteritems():
@@ -65,6 +70,14 @@ class Results(object):
                     d[k] = v.isoformat()
                 else:
                     d[k] = v
+            by_revision[d['revision']].append(d)
+
+        response = []
+        for results in by_revision.values():
+            # copy first element to preserve all the other metadata
+            d = results[0].copy()
+            d['metric'] = float(sum([x['metric'] for x in results])) / len(results)
+            d['pass'] = all([x['pass'] for x in results])
             response.append(d)
         return response
 
