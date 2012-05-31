@@ -20,18 +20,22 @@ class LogParser(object):
     def timestamp_from_buildid(self, buildid):
         return int(time.mktime(datetime.datetime.strptime(buildid, '%Y%m%d%H%M%S').timetuple()))
 
-    def add_result(self, branch, platform, test, buildid, revision, is_pass,
-                   metric=0):
+    def cache_ids(self, branch, platform, test):
         c = self.db.cursor()
-        if branch not in self.branches:
+        if branch and branch not in self.branches:
             c.execute('insert into branch (name) values (%s)', [branch])
             self.branches[branch] = c.lastrowid
-        if platform not in self.platforms:
+        if platform and platform not in self.platforms:
             c.execute('insert into platform (name) values (%s)', [platform])
             self.platforms[platform] = c.lastrowid
-        if test not in self.tests:
+        if test and test not in self.tests:
             c.execute('insert into test (name) values (%s)', [test])
             self.tests[test] = c.lastrowid
+
+    def add_result(self, branch, platform, test, buildid, revision, is_pass,
+                   metric=0):
+        self.cache_ids(branch, platform, test)
+        c = self.db.cursor()
         c.execute('insert into result (branch_id, platform_id, test_id, builddate, revision, pass, metric) values (%s, %s, %s, %s, %s, %s, %s)',
                   (self.branches[branch],
                    self.platforms[platform],
@@ -54,7 +58,7 @@ class LogParser(object):
             for id, name in c.fetchall():
                 d[name] = id
 
-    def parse_log(self, filename, buildid='', revision=''):
+    def parse_log(self, filename, buildid='', revision='', clobber=False):
         logging.debug('parsing %s' % filename)
         self.build_cache()
         m = re.match('([^_]+)_(.+)_test', os.path.basename(filename))
@@ -66,7 +70,22 @@ class LogParser(object):
                 m = re.match('buildid: ([\d]+)', line)
                 if m:
                     buildid = m.group(1)
-                    logging.debug('build id %s on %s, os %s' % (buildid, branch, platform))
+                    logging.debug('build id %s on %s, os %s' %
+                                  (buildid, branch, platform))
+            if not revision:
+                m = re.match('revision: ([\w]+)', line)
+                if m:
+                    revision = m.group(1)
+                    logging.debug('revision %s on %s, os %s' %
+                                  (revision, branch, platform))
+                    if clobber:
+                        self.cache_ids(branch, platform, None)
+                        c = self.db.cursor()
+                        c.execute('delete from result where branch_id=%s and platform_id=%s and revision=%s',
+                                  (self.branches[branch],
+                                   self.platforms[platform],
+                                   revision))
+                        
             if 'PEP TEST-UNEXPECTED-FAIL' in line:
                 parts = [x.strip() for x in line.split('|')]
                 test = parts[1]
