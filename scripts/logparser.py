@@ -35,12 +35,26 @@ class LogParser(object):
     def add_results(self, branch, platform, test, buildid, revision, periods):
         self.cache_ids(branch, platform, test)
         c = self.db.cursor()
+
+        # HACK: Saw a buildid with seconds of 61; check and adjust for this
+        # FIXME: Figure out why this is... the timestamp (1338338641) 
+        # corresponded to the "normalized" time (2012-05-29 17:44:01), but
+        # the build id was 20120529174361.
+        # For now we are only normalizing the seconds and minutes...
+        m = re.match('(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})', buildid)
+        parts = [int(x) for x in m.groups()]
+        for x in range(5, 3, -1):
+            while parts[x] > 59:
+                parts[x-1] += 1
+                parts[x] -= 60
+        builddate = datetime.datetime(*parts)
+
         for p in periods:
             c.execute('insert into result (branch_id, platform_id, test_id, builddate, revision, run, unresponsive_period, action) values (%s, %s, %s, %s, %s, %s, %s, %s)',
                       (self.branches[branch],
                        self.platforms[platform],
                        self.tests[test],
-                       datetime.datetime.strptime(buildid, '%Y%m%d%H%M%S'),
+                       builddate,
                        revision,
                        p['run'],
                        p['period'],
