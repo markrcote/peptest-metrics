@@ -50,7 +50,7 @@ function getDataPoints(data) {
   var lastPoint = points.length ? points[points.length-1].date : null;
   var failurePoints = points.filter(function(x) { return !x.pass; })
                             .map(function(x) { return [x.builddate, x.metric]; });
-  var passPoints = points.filter(function(x) { return x.pass; })
+  var passPoints = points.filter(function(x) { return x.metric == 0; })
                          .map(function(x) { return [x.builddate, 0]; });
   return { failures: failurePoints,
            passes: passPoints,

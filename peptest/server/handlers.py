@@ -54,30 +54,43 @@ class Results(object):
             # 2012-01-02.
             vars['end'] = datetime.datetime.strptime(args['end'][0], '%Y-%m-%d').date() + datetime.timedelta(days=1)
 
-        query = 'select builddate, revision, pass, metric, test.name as test_name, platform.name as platform_name, branch.name as branch_name from result inner join test on result.test_id = test.id inner join branch on result.branch_id = branch.id inner join platform on result.platform_id = platform.id'
+        query = 'select builddate, revision, run, unresponsive_period, test.name as test_name, platform.name as platform_name, branch.name as branch_name from result inner join test on result.test_id = test.id inner join branch on result.branch_id = branch.id inner join platform on result.platform_id = platform.id'
         if wheres:
             query += ' where %s' % ' and '.join(wheres)
         results = db.query(query, vars=vars)
-        
+
+        by_revision = defaultdict(dict)
+
         # average results for each revision
         # all results are for just one test/platform/branch, so we can keep
         # this simple
-        by_revision = defaultdict(list)
+
+        # d['abcdef'][1]['periods'] = [230, 66, 43]
+        # d['abcdef'][1]['metric'] = 59.105
+
+        periods = defaultdict(lambda: defaultdict(list))
+        metrics = defaultdict(lambda: defaultdict(int))
+        revisions = {}
+
         for r in results:
-            d = {}
-            for k, v in r.iteritems():
-                if isinstance(v, datetime.datetime):
-                    d[k] = v.isoformat()
-                else:
-                    d[k] = v
-            by_revision[d['revision']].append(d)
+            if not r['revision'] in revisions:
+                revisions[r['revision']] = { 
+                    'builddate': r['builddate'].isoformat(),
+                    'revision': r['revision'],
+                    'test': r['test_name'],
+                    'platform': r['platform_name'],
+                    'branch': r['branch_name'] }
+            periods[r['revision']][r['run']].append(r['unresponsive_period'])
+
+        for revision, runs in periods.iteritems():
+            for run, period_times in runs.iteritems():
+                metrics[revision][run] = sum([x*x / 1000.0 for x in period_times])
 
         response = []
-        for results in by_revision.values():
+        for results in revisions.values():
             # copy first element to preserve all the other metadata
-            d = results[0].copy()
-            d['metric'] = float(sum([x['metric'] for x in results])) / len(results)
-            d['pass'] = all([x['pass'] for x in results])
+            d = results.copy()
+            d['metric'] = float(sum([x for x in metrics[results['revision']].values()])) / len(metrics[results['revision']].keys())
             response.append(d)
         return response
 

@@ -25,8 +25,9 @@ CREATE TABLE result (
     FOREIGN KEY (platform_id) REFERENCES platform(id),
     test_id INT,
     FOREIGN KEY (test_id) REFERENCES test(id),
+    run INT,
+    action VARCHAR(256) COLLATE utf8_bin,
     builddate DATETIME,
     revision VARCHAR(12) COLLATE utf8_bin,
-    pass SMALLINT,
-    metric FLOAT DEFAULT 0
+    unresponsive_period INT DEFAULT 0
 );

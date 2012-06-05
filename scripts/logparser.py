@@ -32,18 +32,19 @@ class LogParser(object):
             c.execute('insert into test (name) values (%s)', [test])
             self.tests[test] = c.lastrowid
 
-    def add_result(self, branch, platform, test, buildid, revision, is_pass,
-                   metric=0):
+    def add_results(self, branch, platform, test, buildid, revision, periods):
         self.cache_ids(branch, platform, test)
         c = self.db.cursor()
-        c.execute('insert into result (branch_id, platform_id, test_id, builddate, revision, pass, metric) values (%s, %s, %s, %s, %s, %s, %s)',
-                  (self.branches[branch],
-                   self.platforms[platform],
-                   self.tests[test],
-                   datetime.datetime.strptime(buildid, '%Y%m%d%H%M%S'),
-                   revision,
-                   int(is_pass),
-                   metric))
+        for p in periods:
+            c.execute('insert into result (branch_id, platform_id, test_id, builddate, revision, run, unresponsive_period, action) values (%s, %s, %s, %s, %s, %s, %s, %s)',
+                      (self.branches[branch],
+                       self.platforms[platform],
+                       self.tests[test],
+                       datetime.datetime.strptime(buildid, '%Y%m%d%H%M%S'),
+                       revision,
+                       p['run'],
+                       p['period'],
+                       p.get('action', '')))
         self.db.commit()
 
     def build_cache(self):
@@ -60,6 +61,8 @@ class LogParser(object):
 
     def parse_log(self, filename, buildid='', revision='', clobber=False):
         logging.debug('parsing %s' % filename)
+        periods = {}
+        runs = defaultdict(int)
         self.build_cache()
         m = re.match('([^_]+)_(.+)_test', os.path.basename(filename))
         branch = m.group(1)
@@ -85,23 +88,38 @@ class LogParser(object):
                                   (self.branches[branch],
                                    self.platforms[platform],
                                    revision))
-                        
-            if 'PEP TEST-UNEXPECTED-FAIL' in line:
-                parts = [x.strip() for x in line.split('|')]
-                test = parts[1]
-                m = re.search('metric: ([\d\.]*)', parts[2])
-                if m:
-                    metric = float(m.group(1))
-                    self.add_result(branch, platform, test, buildid, revision,
-                                    False, metric)
-                    logging.debug('failure in test %s: %0.1f' % (test, metric))
+            if not 'PEP ' in line:
+                continue
+            parts = [x.strip() for x in line.split('|')]
+            test = parts[1]
+            if 'PEP TEST-START' in line:
+                if test in periods:
+                    logging.error('Did not receive PEP TEST-END for test %s, run %d.' % (test, runs[test]))
+                runs[test] += 1
+                periods[test] = []
+            elif 'PEP TEST-END' in line:
+                if not test in periods:
+                    logging.error('Got PEP TEST-END but no PEP TEST-START '
+                                  'for test %s.' % test)
+                elif not periods[test]:
+                    logging.error('No results for test %s.' % test)
+                    del periods[test]
                 else:
-                    logging.error('Bad failure message: %s' % line)
+                    self.add_results(branch, platform, test, buildid, revision,
+                                     periods[test])
+                    del periods[test]
             elif 'PEP TEST-PASS' in line:
-                parts = [x.strip() for x in line.split('|')]
-                test = parts[1]
-                self.add_result(branch, platform, test, buildid, revision, True)
-                logging.debug('pass in test %s' % test)
+                if not len(periods[test]):
+                    periods[test].append({'period': 0, 'run': runs[test]})
+            elif 'PEP WARNING' in line:
+                if len(parts) < 4:
+                    continue
+                m = re.match('unresponsive time: (\d+) ms', parts[3])
+                if m:
+                    periods[test].append({'period': int(m.group(1)),
+                                          'run': runs[test],
+                                          'action': parts[2]})
+
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
@@ -109,4 +127,4 @@ if __name__ == '__main__':
     lp = LogParser('peptest', 'peptest', 'peptest')
     for f in os.listdir(logs_dir):
         filename = os.path.join(logs_dir, f) 
-        lp.parse_log(filename)
+        lp.parse_log(filename, clobber=True)

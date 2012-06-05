@@ -19,9 +19,11 @@ from pulsebuildmonitor import start_pulse_monitor
 class Collector(object):
 
     def __init__(self, db_name, db_user, db_passwd):
+        self.db_name = db_name
+        self.db_user = db_user
+        self.db_passwd = db_passwd
         self.logs_dir = 'logs'
         self.l = threading.RLock()
-        self.lp = logparser.LogParser(db_name, db_user, db_passwd)
         try:
             os.mkdir(self.logs_dir)
         except OSError:
@@ -43,7 +45,10 @@ class Collector(object):
             log_path = os.path.join(self.logs_dir, os.path.basename(url))
             urllib.urlretrieve(url, log_path)
             logging.debug('parsing...')
-            self.lp.parse_log(log_path, buildid, data['revision'])
+            # had a problem with the MySQL connection going away, so create
+            # a new log parser each time, which creates a new connection.
+            lp = logparser.LogParser(self.db_name, self.db_user, self.db_passwd)
+            lp.parse_log(log_path, buildid, data['revision'])
             logging.debug('cleaning up...')
             os.unlink(log_path)
         self.l.release()
